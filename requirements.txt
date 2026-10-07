@@ -1,7 +1,9 @@
 fastapi[standard]
 uvicorn[standard]
+sqlmodel
 sqlalchemy
 alembic
+psycopg[binary]
 psycopg2-binary
 pydantic-settings
 python-jose[cryptography]
