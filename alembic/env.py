@@ -11,6 +11,7 @@ from app.models.user import User
 from app.models.client import Client
 from app.models.master import Master
 from app.models.service import Service
+from app.models.appointment import Appointment
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
