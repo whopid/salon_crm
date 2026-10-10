@@ -45,4 +45,3 @@ class AppointmentCreate(SQLModel):
     master_id: UUID
     service_id: UUID
     starts_at: datetime.datetime
-    ends_at: datetime.datetime
