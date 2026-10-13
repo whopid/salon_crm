@@ -94,3 +94,56 @@ async def test_create_overlapping_appointment_returns_409(
         json=payload,
     )
     assert second_response.status_code == 409
+
+async def test_same_time_appointment_after_cancelling_previous_appointment(
+        client,
+        appointment_data,
+):
+    payload = {
+        "client_id": str(appointment_data["client"].id),
+        "master_id": str(appointment_data["master"].id),
+        "service_id": str(appointment_data["service"].id),
+        "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+    }
+
+    response = await client.post(
+        "/appointments",
+        json=payload,
+    )
+    assert response.status_code == 201
+
+    appointment_id = response.json()["id"]
+
+    response = await client.post(f"/appointments/{appointment_id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+    response = await client.post(
+        "/appointments",
+        json=payload,
+    )
+    assert response.status_code == 201
+
+async def test_return_409_after_trying_to_cancel_cancelled_appointment(
+        client,
+        appointment_data,
+):
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(appointment_data["master"].id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+    assert response.status_code == 201
+
+    appointment_id = response.json()["id"]
+
+    response = await client.post(f"/appointments/{appointment_id}/cancel")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+
+    response = await client.post(f"/appointments/{appointment_id}/cancel")
+    assert response.status_code == 409

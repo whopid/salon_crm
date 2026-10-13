@@ -7,7 +7,7 @@ from sqlmodel import Session
 from sqlalchemy.exc import IntegrityError
 
 from app.db import get_session
-from app.models.appointment import AppointmentCreate, Appointment
+from app.models.appointment import AppointmentCreate, Appointment, AppointmentStatus
 from app.models.client import Client
 from app.models.master import Master
 from app.models.service import Service
@@ -89,3 +89,27 @@ def create_client(full_name: str, phone_number: str, email: EmailStr, session: S
     session.commit()
     session.refresh(client)
     return client
+
+@app.post("/appointments/{appointment_id}/cancel", response_model=Appointment)
+def cancel_appointment(appointment_id: str, session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if appointment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Appointment not found",
+        )
+    if appointment.status == AppointmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=409,
+            detail="Appointment already completed",
+        )
+    if appointment.status == AppointmentStatus.CANCELLED:
+        raise HTTPException(
+            status_code=409,
+            detail="Appointment already cancelled",
+        )
+    appointment.status = AppointmentStatus.CANCELLED
+    session.add(appointment)
+    session.commit()
+    session.refresh(appointment)
+    return appointment
