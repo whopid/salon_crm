@@ -1,9 +1,9 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 from decimal import Decimal
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from pydantic import EmailStr
-from sqlmodel import Session
+from sqlmodel import Session, select
 from sqlalchemy.exc import IntegrityError
 
 from app.db import get_session
@@ -113,3 +113,83 @@ def cancel_appointment(appointment_id: str, session: Session = Depends(get_sessi
     session.commit()
     session.refresh(appointment)
     return appointment
+
+@app.get("/appointments", response_model=list[Appointment])
+def list_appointments(
+        master_id: str | None = None,
+        client_id: str | None = None,
+        status: AppointmentStatus | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        session: Session = Depends(get_session)
+):
+    if (
+        date_from is not None
+        and date_to is not None
+        and date_from > date_to
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="date_from must be earlier than or equal to date_to",
+        )
+
+    statement = select(Appointment)
+    if master_id is not None:
+        statement = statement.where(Appointment.master_id == master_id)
+
+    if client_id is not None:
+        statement = statement.where(Appointment.client_id == client_id)
+
+    if status is not None:
+        statement = statement.where(Appointment.status == status)
+
+    if date_from is not None:
+        statement = statement.where(Appointment.starts_at >= date_from)
+
+    if date_to is not None:
+        statement = statement.where(Appointment.starts_at <= date_to)
+
+    statement = (
+        statement
+        .order_by(Appointment.starts_at, Appointment.id)
+        .offset(offset)
+        .limit(limit)
+    )
+
+    appointments = session.exec(statement).all()
+
+    return appointments
+
+@app.get("/appointments/{appointment_id}", response_model=Appointment)
+def read_appointment(appointment_id: str, session: Session = Depends(get_session)):
+    appointment = session.get(Appointment, appointment_id)
+    if appointment is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Appointment not found",
+        )
+    return appointment
+
+@app.get("/masters", response_model=list[Master])
+def read_masters(is_active: bool | None = None, session: Session = Depends(get_session)):
+    statement = select(Master)
+    if is_active:
+        statement = statement.where(Master.is_active)
+    masters = session.exec(statement).all()
+    return masters
+
+@app.get("/services", response_model=list[Service])
+def read_services(is_active: bool | None = None, session: Session = Depends(get_session)):
+    statement = select(Service)
+    if is_active:
+        statement = statement.where(Service.is_active)
+    services = session.exec(statement).all()
+    return services
+
+@app.get("/clients", response_model=list[Client])
+def read_clients(session: Session = Depends(get_session)):
+    statement = select(Client)
+    clients = session.exec(statement).all()
+    return clients

@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
+from app.models.appointment import AppointmentStatus
+from app.models.master import Master
+
 
 async def test_create_appointment_returns_201_and_correct_ends_at(
     client,
@@ -147,3 +150,94 @@ async def test_return_409_after_trying_to_cancel_cancelled_appointment(
 
     response = await client.post(f"/appointments/{appointment_id}/cancel")
     assert response.status_code == 409
+
+async def test_get_appointments_returns_empty_list(client):
+    response = await client.get("/appointments")
+    assert response.status_code == 200
+    assert response.json() == []
+
+async def test_get_appointments_filters_by_master(
+        client,
+        appointment_data,
+        db_session,
+):
+    second_master = Master(
+        full_name="Second Master",
+        phone_number="+79990000010",
+    )
+    db_session.add(second_master)
+    db_session.flush()
+
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(appointment_data["master"].id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(second_master.id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.get(
+        "/appointments",
+        params={"master_id": str(appointment_data["master"].id)},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["master_id"] == str(appointment_data["master"].id)
+
+async def test_get_appointments_filters_by_status_and_date(
+        client,
+        appointment_data,
+):
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(appointment_data["master"].id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "status": AppointmentStatus.CONFIRMED,
+        },
+    )
+    assert response.status_code == 201
+
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(appointment_data["master"].id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": datetime(2026, 11, 11, 10, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+    assert response.status_code == 201
+    second_appointment_id = response.json()["id"]
+
+    response = await client.get(
+        "/appointments",
+        params={
+            "status": "scheduled",
+            "date_from": datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc).isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["id"] == second_appointment_id
