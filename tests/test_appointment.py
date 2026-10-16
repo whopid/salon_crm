@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 from app.models.appointment import AppointmentStatus
 from app.models.master import Master
@@ -12,7 +12,7 @@ async def test_create_appointment_returns_201_and_correct_ends_at(
     test_master = appointment_data["master"]
     test_service = appointment_data["service"]
 
-    starts_at = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)
+    starts_at = datetime.now(UTC) + timedelta(days=1)
 
     response = await client.post(
         "/appointments",
@@ -45,7 +45,7 @@ async def test_create_same_time_appointment_returns_409(
     test_master = appointment_data["master"]
     test_service = appointment_data["service"]
 
-    starts_at = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)
+    starts_at = datetime.now(UTC) + timedelta(days=1)
 
     payload = {
         "client_id": str(test_client.id),
@@ -74,8 +74,8 @@ async def test_create_overlapping_appointment_returns_409(
     test_master = appointment_data["master"]
     test_service = appointment_data["service"]
 
-    first_starts_at = datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc)
-    second_starts_at = datetime(2026, 11, 10, 10, 30, tzinfo=timezone.utc)
+    first_starts_at = datetime.now(UTC) + timedelta(days=1)
+    second_starts_at = datetime.now(UTC) + timedelta(days=1, minutes=30)
 
     payload = {
         "client_id": str(test_client.id),
@@ -102,11 +102,12 @@ async def test_same_time_appointment_after_cancelling_previous_appointment(
         client,
         appointment_data,
 ):
+    starts_at = datetime.now(UTC) + timedelta(days=1)
     payload = {
         "client_id": str(appointment_data["client"].id),
         "master_id": str(appointment_data["master"].id),
         "service_id": str(appointment_data["service"].id),
-        "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+        "starts_at": starts_at.isoformat(),
     }
 
     response = await client.post(
@@ -131,13 +132,14 @@ async def test_return_409_after_trying_to_cancel_cancelled_appointment(
         client,
         appointment_data,
 ):
+    starts_at = datetime.now(UTC) + timedelta(days=1)
     response = await client.post(
         "/appointments",
         json={
             "client_id": str(appointment_data["client"].id),
             "master_id": str(appointment_data["master"].id),
             "service_id": str(appointment_data["service"].id),
-            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "starts_at": starts_at.isoformat(),
         },
     )
     assert response.status_code == 201
@@ -167,14 +169,14 @@ async def test_get_appointments_filters_by_master(
     )
     db_session.add(second_master)
     db_session.flush()
-
+    starts_at = datetime.now(UTC) + timedelta(days=1)
     response = await client.post(
         "/appointments",
         json={
             "client_id": str(appointment_data["client"].id),
             "master_id": str(appointment_data["master"].id),
             "service_id": str(appointment_data["service"].id),
-            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "starts_at": starts_at.isoformat(),
         },
     )
     assert response.status_code == 201
@@ -185,7 +187,7 @@ async def test_get_appointments_filters_by_master(
             "client_id": str(appointment_data["client"].id),
             "master_id": str(second_master.id),
             "service_id": str(appointment_data["service"].id),
-            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "starts_at": starts_at.isoformat(),
         },
     )
     assert response.status_code == 201
@@ -205,25 +207,27 @@ async def test_get_appointments_filters_by_status_and_date(
         client,
         appointment_data,
 ):
+    first_starts_at = datetime.now(UTC) + timedelta(days=1)
     response = await client.post(
         "/appointments",
         json={
             "client_id": str(appointment_data["client"].id),
             "master_id": str(appointment_data["master"].id),
             "service_id": str(appointment_data["service"].id),
-            "starts_at": datetime(2026, 11, 10, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "starts_at": first_starts_at.isoformat(),
             "status": AppointmentStatus.CONFIRMED,
         },
     )
     assert response.status_code == 201
 
+    second_starts_at = datetime.now(UTC) + timedelta(days=2)
     response = await client.post(
         "/appointments",
         json={
             "client_id": str(appointment_data["client"].id),
             "master_id": str(appointment_data["master"].id),
             "service_id": str(appointment_data["service"].id),
-            "starts_at": datetime(2026, 11, 11, 10, 0, tzinfo=timezone.utc).isoformat(),
+            "starts_at": second_starts_at.isoformat(),
         },
     )
     assert response.status_code == 201
@@ -233,7 +237,7 @@ async def test_get_appointments_filters_by_status_and_date(
         "/appointments",
         params={
             "status": "scheduled",
-            "date_from": datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc).isoformat(),
+            "date_from": second_starts_at.isoformat(),
         },
     )
 
@@ -241,3 +245,20 @@ async def test_get_appointments_filters_by_status_and_date(
     data = response.json()
     assert len(data) == 1
     assert data[0]["id"] == second_appointment_id
+
+async def test_starts_at_in_past_returns_422(
+        client,
+        appointment_data,
+):
+    past_date = datetime.now(UTC) - timedelta(days=1)
+
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(appointment_data["client"].id),
+            "master_id": str(appointment_data["master"].id),
+            "service_id": str(appointment_data["service"].id),
+            "starts_at": past_date.isoformat(),
+        }
+    )
+    assert response.status_code == 422

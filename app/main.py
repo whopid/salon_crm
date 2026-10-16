@@ -1,4 +1,4 @@
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, UTC
 from decimal import Decimal
 
 from fastapi import FastAPI, Depends, HTTPException, Query
@@ -27,6 +27,16 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
             status_code=404,
             detail="Service not found",
         )
+    if not service.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Service is not active",
+        )
+
+    if data.starts_at < datetime.now(UTC):
+        raise HTTPException(
+            status_code=422,
+            detail="starts_at cannot be in the past")
 
     client = session.get(Client, data.client_id)
 
@@ -44,6 +54,12 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
             detail="Master not found",
         )
 
+    if not master.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Master is not active",
+        )
+
     ends_at = data.starts_at + timedelta(minutes=service.duration_minutes)
 
     appointment = Appointment(
@@ -58,12 +74,11 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
         session.add(appointment)
         session.commit()
         session.refresh(appointment)
-    except IntegrityError:
+    except IntegrityError as e:
         session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Appointment overlaps with existing appointment",
-        )
+        if "appointments_no_overlap" in str(e.orig):
+            raise HTTPException(409, "Appointment overlaps")
+        raise HTTPException(409, "Integrity error")
     return appointment
 
 @app.post("/services", response_model=Service)
