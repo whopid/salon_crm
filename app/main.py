@@ -1,5 +1,6 @@
 from datetime import timedelta, datetime, UTC
 from decimal import Decimal
+from uuid import UUID
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from pydantic import EmailStr
@@ -10,6 +11,7 @@ from app.db import get_session
 from app.models.appointment import AppointmentCreate, Appointment, AppointmentStatus
 from app.models.client import Client
 from app.models.master import Master
+from app.models.master_service import MasterService
 from app.models.service import Service
 
 app = FastAPI()
@@ -60,6 +62,13 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
             detail="Master is not active",
         )
 
+    master_service = session.get(MasterService, (master.id, service.id))
+    if master_service is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Master does not provide this service",
+        )
+
     ends_at = data.starts_at + timedelta(minutes=service.duration_minutes)
 
     appointment = Appointment(
@@ -81,7 +90,7 @@ def create_appointment(data: AppointmentCreate, session: Session = Depends(get_s
         raise HTTPException(409, "Integrity error")
     return appointment
 
-@app.post("/services", response_model=Service)
+@app.post("/services", response_model=Service, status_code=201)
 def create_service(name: str, duration_minutes: int, price: Decimal, session: Session = Depends(get_session)):
     service = Service(name=name, duration_minutes=duration_minutes, price=price)
     session.add(service)
@@ -89,7 +98,7 @@ def create_service(name: str, duration_minutes: int, price: Decimal, session: Se
     session.refresh(service)
     return service
 
-@app.post("/masters", response_model=Master)
+@app.post("/masters", response_model=Master, status_code=201)
 def create_master(full_name: str, phone_number: str, session: Session = Depends(get_session)):
     master = Master(full_name=full_name, phone_number=phone_number)
     session.add(master)
@@ -97,7 +106,7 @@ def create_master(full_name: str, phone_number: str, session: Session = Depends(
     session.refresh(master)
     return master
 
-@app.post("/clients", response_model=Client)
+@app.post("/clients", response_model=Client, status_code=201)
 def create_client(full_name: str, phone_number: str, email: EmailStr, session: Session = Depends(get_session)):
     client = Client(full_name=full_name, phone_number=phone_number, email=email)
     session.add(client)
@@ -106,7 +115,7 @@ def create_client(full_name: str, phone_number: str, email: EmailStr, session: S
     return client
 
 @app.post("/appointments/{appointment_id}/cancel", response_model=Appointment)
-def cancel_appointment(appointment_id: str, session: Session = Depends(get_session)):
+def cancel_appointment(appointment_id: UUID, session: Session = Depends(get_session)):
     appointment = session.get(Appointment, appointment_id)
     if appointment is None:
         raise HTTPException(
@@ -131,8 +140,8 @@ def cancel_appointment(appointment_id: str, session: Session = Depends(get_sessi
 
 @app.get("/appointments", response_model=list[Appointment])
 def list_appointments(
-        master_id: str | None = None,
-        client_id: str | None = None,
+        master_id: UUID | None = None,
+        client_id: UUID | None = None,
         status: AppointmentStatus | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
@@ -178,7 +187,7 @@ def list_appointments(
     return appointments
 
 @app.get("/appointments/{appointment_id}", response_model=Appointment)
-def read_appointment(appointment_id: str, session: Session = Depends(get_session)):
+def read_appointment(appointment_id: UUID, session: Session = Depends(get_session)):
     appointment = session.get(Appointment, appointment_id)
     if appointment is None:
         raise HTTPException(
@@ -208,3 +217,96 @@ def read_clients(session: Session = Depends(get_session)):
     statement = select(Client)
     clients = session.exec(statement).all()
     return clients
+
+@app.post("/masters/{master_id}/services/{service_id}", response_model=MasterService, status_code=201)
+def assign_service_to_master(
+        master_id: UUID,
+        service_id: UUID,
+        session: Session = Depends(get_session),
+):
+    master = session.get(Master, master_id)
+    if master is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Master not found",
+        )
+    if not master.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Master is not active",
+        )
+
+    service = session.get(Service, service_id)
+    if service is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service not found",
+        )
+    if not service.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail="Service is not active",
+        )
+
+    master_service = MasterService(master_id=master.id, service_id=service.id)
+    try:
+        session.add(master_service)
+        session.commit()
+        session.refresh(master_service)
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Could not assign service to master",
+        )
+    return master_service
+
+@app.delete("/masters/{master_id}/services/{service_id}", response_model=MasterService)
+def unassign_service_from_master(
+        master_id: UUID,
+        service_id: UUID,
+        session: Session = Depends(get_session),
+):
+    service = session.get(Service, service_id)
+    if service is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service not found",
+        )
+    master = session.get(Master, master_id)
+    if master is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Master not found",
+        )
+
+    master_service = session.get(MasterService, (master_id, service_id))
+    if master_service is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Service is not assigned to master",
+        )
+    session.delete(master_service)
+    session.commit()
+    return master_service
+
+@app.get("/masters/{master_id}/services", response_model=list[Service])
+def list_masters_services(master_id: UUID, session: Session = Depends(get_session)):
+    master = session.get(Master, master_id)
+    if master is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Master not found",
+        )
+
+    statement = (
+        select(Service)
+        .join(
+            MasterService,
+            MasterService.service_id == Service.id,
+        )
+        .where(MasterService.master_id == master_id)
+    )
+
+    services = session.exec(statement).all()
+    return services

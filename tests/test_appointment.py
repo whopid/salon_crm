@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone, UTC
 
 from app.models.appointment import AppointmentStatus
 from app.models.master import Master
+from app.models.master_service import MasterService
 
 
 async def test_create_appointment_returns_201_and_correct_ends_at(
@@ -169,6 +170,14 @@ async def test_get_appointments_filters_by_master(
     )
     db_session.add(second_master)
     db_session.flush()
+
+    second_master_service = MasterService(
+        master_id=second_master.id,
+        service_id=appointment_data["service"].id,
+    )
+    db_session.add(second_master_service)
+    db_session.flush()
+
     starts_at = datetime.now(UTC) + timedelta(days=1)
     response = await client.post(
         "/appointments",
@@ -262,3 +271,32 @@ async def test_starts_at_in_past_returns_422(
         }
     )
     assert response.status_code == 422
+
+async def test_appointment_to_service_that_master_dont_provide_returns_409(
+        client,
+        appointment_data,
+        db_session,
+):
+    test_client = appointment_data["client"]
+    test_master = Master(
+        full_name="Second Master",
+        phone_number="+79990000010",
+    )
+    db_session.add(test_master)
+    db_session.flush()
+    test_service = appointment_data["service"]
+
+    starts_at = datetime.now(UTC) + timedelta(days=1)
+
+
+    response = await client.post(
+        "/appointments",
+        json={
+            "client_id": str(test_client.id),
+            "master_id": str(test_master.id),
+            "service_id": str(test_service.id),
+            "starts_at": starts_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 409

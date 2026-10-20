@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -7,6 +9,9 @@ from sqlmodel import Session
 from app.db import get_session
 from app.main import app
 from app.models.client import Client
+from app.models.master import Master
+from app.models.master_service import MasterService
+from app.models.service import Service
 from env import TEST_DATABASE_URL
 
 
@@ -47,13 +52,6 @@ async def client(db_session):
     finally:
         app.dependency_overrides.pop(get_session, None)
 
-import pytest
-from decimal import Decimal
-
-from app.models.client import Client
-from app.models.master import Master
-from app.models.service import Service
-
 
 @pytest.fixture
 def appointment_data(db_session):
@@ -77,6 +75,13 @@ def appointment_data(db_session):
     db_session.add(test_client)
     db_session.add(test_master)
     db_session.add(test_service)
+    db_session.flush()
+
+    test_master_service = MasterService(
+        master_id=test_master.id,
+        service_id=test_service.id,
+    )
+    db_session.add(test_master_service)
     db_session.flush()
 
     return {
